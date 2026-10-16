@@ -13,7 +13,7 @@ dotenv.config({ path: path.join(serverRoot, '..', '.env'), override: false });
 
 function intEnv(name, fallback) {
   const v = Number(process.env[name]);
-  return Number.isFinite(v) && v > 0 ? v : fallback;
+  return Number.isSafeInteger(v) && v > 0 ? v : fallback;
 }
 
 function boolEnv(name, fallback) {
@@ -37,6 +37,9 @@ const config = {
   },
 
   scrape: {
+    concurrency: Math.min(16, Math.floor(intEnv('SCRAPE_CONCURRENCY', 4))),
+    timeoutMs: Math.floor(intEnv('SCRAPE_TIMEOUT_MS', 20000)),
+    maxResponseBytes: Math.floor(intEnv('SCRAPE_MAX_RESPONSE_BYTES', 2 * 1024 * 1024)),
     intervalMinutes: intEnv('SCRAPE_INTERVAL_MINUTES', 30),
     cronSecret: process.env.CRON_SECRET || 'dev-cron-secret',
     enableInProcessCron: boolEnv('ENABLE_IN_PROCESS_CRON', true),
@@ -61,7 +64,25 @@ const config = {
     .map((s) => s.trim())
     .filter(Boolean),
 
+  adminUserIds: (process.env.ADMIN_USER_IDS || '').split(',').map((s) => Number(s.trim())).filter((id) => Number.isSafeInteger(id) && id > 0),
+  trustProxy: /^\d+$/.test(process.env.TRUST_PROXY || '') ? Number(process.env.TRUST_PROXY) : 0,
+
   serverRoot,
 };
+
+if (config.env === 'production') {
+  for (const [name, value] of [
+    ['JWT_ACCESS_SECRET', config.jwt.accessSecret],
+    ['JWT_REFRESH_SECRET', config.jwt.refreshSecret],
+    ['CRON_SECRET', config.scrape.cronSecret],
+  ]) {
+    if (value.length < 32 || /^(dev-|change-me)/i.test(value)) {
+      throw new Error(`${name} must be a unique random secret of at least 32 characters in production`);
+    }
+  }
+  if (config.jwt.accessSecret === config.jwt.refreshSecret) {
+    throw new Error('JWT access and refresh secrets must be different');
+  }
+}
 
 export default config;

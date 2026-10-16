@@ -10,10 +10,12 @@ import historyRoutes from './routes/history.js';
 import sourceRoutes from './routes/sources.js';
 import cronRoutes from './routes/cron.js';
 import metaRoutes from './routes/meta.js';
+import { VERSION } from './version.js';
 
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', config.trustProxy);
   app.use(cors({ origin: config.corsOrigins, credentials: true }));
   app.use(express.json({ limit: '100kb' }));
 
@@ -22,7 +24,7 @@ export function createApp() {
     const start = Date.now();
     res.on('finish', () => {
       const dur = Date.now() - start;
-      if (req.path.startsWith('/api')) {
+      if (req.originalUrl.startsWith('/api')) {
         console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${dur}ms`);
       }
     });
@@ -31,7 +33,7 @@ export function createApp() {
 
   // Health check (also used by platform uptime checks).
   app.get('/api/health', (req, res) => {
-    res.json({ ok: true, ts: Date.now(), env: config.env });
+    res.json({ ok: true, version: VERSION, commit: process.env.RENDER_GIT_COMMIT || null, ts: Date.now(), env: config.env });
   });
 
   // API routes.
@@ -66,7 +68,7 @@ export function createApp() {
       })
     );
     app.get('*', (req, res) => {
-      res.sendFile(path.join(clientDist, 'index.html'));
+      res.sendFile(path.join(clientDist, 'index.html'), { headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
     });
     console.log(`[app] serving static frontend from ${clientDist}`);
   } else {

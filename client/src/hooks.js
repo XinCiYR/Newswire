@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from './api';
+import { useAuth } from './auth';
 
 /** Fetch a paged article list, reconciling async updates (prevents stale writes). */
 export function useArticles(params = {}) {
+  const { user, ready } = useAuth();
   const [state, setState] = useState({ articles: [], total: 0, loading: true, error: null });
   const seq = useRef(0);
 
@@ -19,7 +21,7 @@ export function useArticles(params = {}) {
         setState((s) => ({ ...s, loading: false, error: e.message }));
       }
     }
-  }, [JSON.stringify(params)]);
+  }, [JSON.stringify(params), user?.id, ready]);
 
   useEffect(() => {
     load();

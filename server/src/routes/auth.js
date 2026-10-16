@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { createUser, findByEmail, publicUser, getTokenVersion, bumpTokenVersion, updateName } from '../models/users.js';
 import { hashPassword, verifyPassword, validateEmail } from '../auth/password.js';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../auth/jwt.js';
+import { verifyRefreshToken } from '../auth/jwt.js';
+import { issueTokens } from '../auth/sessions.js';
+import getDb from '../db/database.js';
 import { requireAuth } from '../auth/middleware.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
@@ -24,12 +26,6 @@ function body(req) {
   return req.body || {};
 }
 
-function issueTokens(user) {
-  const access = signAccessToken(user.id);
-  const refresh = signRefreshToken(user.id, user.token_version);
-  return { accessToken: access, refreshToken: refresh, tokenType: 'Bearer' };
-}
-
 // POST /api/auth/register
 router.post('/register', authLimiter, async (req, res, next) => {
   try {
@@ -44,7 +40,7 @@ router.post('/register', authLimiter, async (req, res, next) => {
 
     const passwordHash = await hashPassword(password);
     const user = await createUser(normalized, passwordHash, normalizeName(name));
-    return res.status(201).json({ user: { id: user.id, email: user.email, name: user.name }, ...issueTokens(user) });
+    return res.status(201).json({ user: await publicUser(user.id), ...await issueTokens(user) });
   } catch (e) {
     next(e);
   }
@@ -56,11 +52,12 @@ router.post('/login', authLimiter, async (req, res, next) => {
     const { email, password } = body(req);
     const normalized = validateEmail(email);
     if (!normalized) return res.status(400).json({ error: 'A valid email is required' });
+    if (!isValidPassword(password)) return res.status(401).json({ error: 'Invalid email or password' });
     const user = await findByEmail(normalized);
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
     const ok = await verifyPassword(password || '', user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
-    return res.json({ user: { id: user.id, email: user.email }, ...issueTokens(user) });
+    return res.json({ user: await publicUser(user.id), ...await issueTokens(user) });
   } catch (e) {
     next(e);
   }
@@ -82,7 +79,9 @@ router.post('/refresh', authLimiter, async (req, res, next) => {
     if (!user) return res.status(401).json({ error: 'Account no longer exists' });
     const ver = await getTokenVersion(user.id);
     if (Number(payload.ver) !== ver) return res.status(401).json({ error: 'Refresh token revoked' });
-    return res.json({ ...issueTokens({ ...user, token_version: ver }) });
+    const tokens = await issueTokens({ ...user, token_version: ver }, refreshToken);
+    if (!tokens) return res.status(401).json({ error: 'Refresh token already used or revoked' });
+    return res.json(tokens);
   } catch (e) {
     next(e);
   }
@@ -113,6 +112,7 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
 router.post('/logout', requireAuth, async (req, res, next) => {
   try {
     await bumpTokenVersion(req.user.id);
+    await getDb().run('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);
     return res.json({ ok: true });
   } catch (e) {
     next(e);

@@ -1,5 +1,16 @@
 import { verifyAccessToken } from './jwt.js';
 import { getDb } from '../db/database.js';
+import config from '../config.js';
+
+export function isAdmin(userId) {
+  return config.adminUserIds.includes(Number(userId));
+}
+
+// Use after requireAuth. An empty ADMIN_USER_IDS list disables administrative writes.
+export function requireAdmin(req, res, next) {
+  if (!isAdmin(req.user?.id)) return res.status(403).json({ error: 'Administrator access required' });
+  next();
+}
 
 function parseBearer(req) {
   const header = req.headers.authorization || '';
@@ -14,8 +25,9 @@ export async function requireAuth(req, res, next) {
     if (!token) return res.status(401).json({ error: 'Authentication required' });
     const payload = verifyAccessToken(token);
     if (payload.type !== 'access') return res.status(401).json({ error: 'Invalid token' });
-    const user = await getDb().get('SELECT id, email FROM users WHERE id = ?', [Number(payload.sub)]);
+    const user = await getDb().get('SELECT id, email, token_version FROM users WHERE id = ?', [Number(payload.sub)]);
     if (!user) return res.status(401).json({ error: 'Account no longer exists' });
+    if (Number(payload.ver) !== Number(user.token_version)) return res.status(401).json({ error: 'Token revoked' });
     req.user = { id: user.id, email: user.email };
     next();
   } catch (e) {
@@ -30,8 +42,8 @@ export async function optionalAuth(req, _res, next) {
     if (token) {
       const payload = verifyAccessToken(token);
       if (payload.type === 'access') {
-        const user = await getDb().get('SELECT id, email FROM users WHERE id = ?', [Number(payload.sub)]);
-        if (user) req.user = { id: user.id, email: user.email };
+        const user = await getDb().get('SELECT id, email, token_version FROM users WHERE id = ?', [Number(payload.sub)]);
+        if (user && Number(payload.ver) === Number(user.token_version)) req.user = { id: user.id, email: user.email };
       }
     }
   } catch {

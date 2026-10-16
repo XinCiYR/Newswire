@@ -12,9 +12,11 @@
     "migrate": "npm --prefix server run migrate",
     "seed": "npm --prefix server run seed",
     "fetch": "npm --prefix server run fetch",
-    "test": "npm --prefix server test"
+    "test": "npm --prefix server test && npm --prefix client test",
+    "test:postgres": "npm --prefix server run test:postgres",
+    "test:docker": "node scripts/docker-smoke.mjs"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0 <25"
   }
 }

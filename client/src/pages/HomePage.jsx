@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useArticles } from '../hooks';
 import ArticleGrid from '../components/ArticleGrid';
 import { CategoryBar, Pager } from '../components/Tabs';
@@ -15,14 +15,14 @@ export default function HomePage() {
   const [source, setSource] = useState('');
   const [range, setRange] = useState('');
 
-  const loadParams = useCallback(() => ({
+  const loadParams = useMemo(() => ({
     limit: PAGE_SIZE,
     offset,
     order: sort,
     sourceId: source || undefined,
     since: range ? Date.now() - RANGE_MS[range] : undefined,
   }), [offset, sort, source, range]);
-  const { articles, total, loading, error, reload } = useArticles(loadParams());
+  const { articles, total, loading, error, reload } = useArticles(loadParams);
 
   function switchSort(next) {
     if (next === sort) return;

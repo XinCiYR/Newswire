@@ -132,6 +132,9 @@ In Render: your service → **Environment** tab. Click **Add Environment Variabl
 | Key | Value |
 |-----|-------|
 | `NODE_ENV` | `production` |
+| `NODE_VERSION` | `24` |
+| `TRUST_PROXY` | `1` for this Render reverse-proxy topology |
+| `ADMIN_USER_IDS` | IDs of existing accounts you control; empty disables administrative writes |
 | `DATABASE_URL` | your Neon connection string |
 | `JWT_ACCESS_SECRET` | long random |
 | `JWT_REFRESH_SECRET` | long random |
@@ -147,6 +150,13 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 Run it **3 times** and paste each into `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `CRON_SECRET`.
 
 After editing env vars, click **Restart service** (top of the service page) to apply.
+
+Use Node 24.x. All three secrets must be random, at least 32 characters, with different
+JWT access/refresh secrets; startup now rejects development defaults in production.
+For administrator access, first sign in to an existing owner-controlled account and
+read its `id` from `/api/auth/me`, then configure `ADMIN_USER_IDS` (e.g. `4,12`).
+Do not guess IDs of accounts that have not been created. Existing sessions must sign
+in again once after deploying the refresh-token migration; accounts and saved data remain.
 
 ---
 
@@ -201,8 +211,19 @@ Open the app URL and check:
 ---
 
 ## 9. Daily ops / iteration
+
+- **Verify changes**: `npm test`; for a dedicated test database set `TEST_DATABASE_URL`
+  and run `npm run test:postgres`; with a running Docker engine use `npm run test:docker`.
+  Tests create isolated temporary schemas and never select the application's `DATABASE_URL`.
+- **New indexes**: startup adds fingerprint/publication, source/publication/ID, and
+  PostgreSQL full-text GIN indexes. PostgreSQL builds these with `CONCURRENTLY` outside
+  a transaction so ongoing article writes can continue; first startup can take longer.
+  Monitor migration logs, disk space and DB activity when deploying against a large table.
+- **Feed limits**: default concurrency 4, timeout 20 seconds, response limit 2 MiB;
+  configure `SCRAPE_CONCURRENCY`, `SCRAPE_TIMEOUT_MS`, `SCRAPE_MAX_RESPONSE_BYTES` if needed.
+  ETag/Last-Modified are persisted automatically; HTTP 304 is recorded as success.
 - **Deploy code**: `git add -A && git commit -m "..." && git push` → Render auto-redeploys.
-- **Add/remove sources**: edit `server/src/scraper/sources.js`, push; or `POST /api/sources` (auth).
+- **Add sources**: `POST /api/sources` with an administrator access token. Editing the built-in source list alone does not update a nonempty database; run `npm run seed` deliberately to sync defaults.
 - **Backups**: use Neon snapshots / `pg_dump`. Back up accounts/favorites/history.
 - **Rollback**: `git revert <sha>` + push, or Render → **Redeploy previous version**.
 - **Monitor**: `https://your-url/api/health` (uptime monitor) + `/api/scrape/health`.

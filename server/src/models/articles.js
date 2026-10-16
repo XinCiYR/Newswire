@@ -1,4 +1,6 @@
 import getDb from '../db/database.js';
+import { invalidateDaily } from '../services/daily.js';
+import { articleSearchVector } from '../db/search.js';
 
 // Helper to map a DB row to the API shape we expose to the client.
 export function toArticle(row) {
@@ -85,6 +87,7 @@ export async function upsertArticle({ sourceId, title, summary, url, imageUrl, p
     await db.run('INSERT INTO articles_fts(rowid, title, summary) VALUES (?, ?, ?)', [id, title, summary || '']);
   }
   const article = await findById(id);
+  invalidateDaily();
   return { article, inserted: true, duplicate: false, reason: null };
 }
 
@@ -103,12 +106,11 @@ async function listArticlesSearch(db, { category, sourceId, q, limit, offset, si
   // PostgreSQL: native full-text search via tsvector/tsquery.
   if (db.isPg) {
     const where = [
-      `to_tsvector('english', coalesce(a.title,'') || ' ' || coalesce(a.summary,'')) @@ plainto_tsquery('english', ?)`,
+      `${articleSearchVector('a')} @@ plainto_tsquery('english', ?)`,
     ];
     const params = [q];
     if (category && category !== '全部' && category !== 'All') { where.push('a.category = ?'); params.push(category); }
     if (sourceId) { where.push('a.source_id = ?'); params.push(Number(sourceId)); }
-    if (since) { where.push('a.published_at >= ?'); params.push(Number(since)); }
     if (since) { where.push('a.published_at >= ?'); params.push(Number(since)); }
     const whereSql = `WHERE ${where.join(' AND ')}`;
     const rows = await db.all(
@@ -123,10 +125,12 @@ async function listArticlesSearch(db, { category, sourceId, q, limit, offset, si
 
   // SQLite: FTS5, ranked by relevance.
   const fts = buildFts(q);
+  if (!fts) return { articles: [], total: 0 };
   const conds = ['articles_fts MATCH ?'];
   const params = [fts];
   if (category && category !== '全部' && category !== 'All') { conds.push('a.category = ?'); params.push(category); }
   if (sourceId) { conds.push('a.source_id = ?'); params.push(Number(sourceId)); }
+  if (since) { conds.push('a.published_at >= ?'); params.push(Number(since)); }
   const whereSql = `WHERE ${conds.join(' AND ')}`;
   const rows = await db.all(
     `SELECT a.*, s.name AS source_name, s.url AS source_url
@@ -193,7 +197,7 @@ export async function incrementViews(id) {
 const STOP = new Set(['the','a','an','to','of','in','on','at','for','and','or','but','with','from','by','is','are','was','were','be','been','has','have','had','it','its','this','that','as','after','over','into','than','their','they','we','you','your','he','she','his','her','will','would','should','could','can','not','no','yes','what','who','how','why','when','where','do','does','did','about','more','most','some','any','all','just','new','news','says','said','say','amid','us','uk','world','today','live']);
 
 function words(t) {
-  return (t || '').toLowerCase().match(/[a-z0-9]{2,}/g) || [];
+  return ((t || '').toLowerCase().match(/[a-z0-9]{2,}/g) || []).filter((word) => !STOP.has(word));
 }
 
 /**
@@ -232,15 +236,15 @@ export async function relatedArticles(id, { limit = 6 } = {}) {
  */
 export async function coverageFor(id) {
   const db = getDb();
-  const cur = await db.get('SELECT id, title FROM articles WHERE id = ?', [id]);
+  const cur = await db.get('SELECT id, title, source_id FROM articles WHERE id = ?', [id]);
   if (!cur) return [];
   const rows = await db.all(
     `SELECT a.source_id, s.name AS source_name, s.url AS source_url, a.title
        FROM articles a JOIN sources s ON s.id = a.source_id
-      WHERE a.id != ? AND a.published_at >= ?
+      WHERE a.id != ? AND a.source_id != ? AND a.published_at >= ?
       ORDER BY a.published_at DESC
       LIMIT 300`,
-    [id, Date.now() - 4 * 24 * 3600 * 1000]
+    [id, cur.source_id, Date.now() - 4 * 24 * 3600 * 1000]
   );
   const target = new Set(words(cur.title));
   const seen = new Set();
@@ -261,5 +265,6 @@ export async function coverageFor(id) {
 
 export async function setCategory(id, category) {
   await getDb().run('UPDATE articles SET category = ? WHERE id = ?', [category, id]);
+  invalidateDaily();
   return findById(id);
 }

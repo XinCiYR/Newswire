@@ -1,16 +1,13 @@
 import Parser from 'rss-parser';
 import { toEpochMs } from '../utils/text.js';
+import { httpUrl } from '../utils/url.js';
+import config from '../config.js';
 
 /**
  * rss-parser with extra namespaced fields so we can pull image URLs that feeds
  * put in media:content / media:thumbnail / content:encoded.
  */
 const parser = new Parser({
-  timeout: 20000,
-  headers: {
-    'User-Agent': 'NewsAggregator/1.0 (+https://example.com; RSS reader)',
-    Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-  },
   customFields: {
     item: [
       ['media:content', 'mediaContent', { keepArray: false }],
@@ -88,19 +85,64 @@ function pickImage(item) {
  * Fetch and parse a feed. Resolves to a list of normalized article-ish objects.
  * Throws on network errors so the caller can log + continue with other feeds.
  */
-export async function fetchFeed(feedUrl) {
-  const feed = await parser.parseURL(feedUrl);
+export async function fetchFeed(feedUrl, {
+  etag = null, lastModified = null,
+  timeoutMs = config.scrape.timeoutMs, maxBytes = config.scrape.maxResponseBytes,
+} = {}) {
+  const url = httpUrl(feedUrl);
+  if (!url) throw new Error('Feed must use an absolute HTTP(S) URL');
+  const headers = {
+    'User-Agent': 'Newswire/1.0 (RSS reader)',
+    Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+  };
+  if (etag) headers['If-None-Match'] = etag;
+  if (lastModified) headers['If-Modified-Since'] = lastModified;
+  // The signal also bounds streaming/slow response bodies, not just headers.
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  const validators = {
+    etag: response.headers.get('etag'),
+    lastModified: response.headers.get('last-modified'),
+  };
+  if (response.status === 304) {
+    return { items: [], notModified: true, etag: validators.etag || etag, lastModified: validators.lastModified || lastModified };
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Feed HTTP ${response.status}`);
+  }
+  if (Number(response.headers.get('content-length')) > maxBytes) {
+    await response.body?.cancel();
+    throw new Error(`Feed exceeds ${maxBytes} byte limit`);
+  }
+  const chunks = [];
+  let size = 0;
+  if (!response.body) throw new Error('Feed response has no body');
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      // Counts decoded bytes too, so compression cannot bypass the memory cap.
+      if (size > maxBytes) throw new Error(`Feed exceeds ${maxBytes} byte limit`);
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  const feed = await parser.parseString(Buffer.concat(chunks, size).toString('utf8'));
   const items = (feed.items || []).map((item) => {
     const title = stripHtml(item.title || '').trim();
-    const url = item.link ? item.link.trim() : '';
+    const url = httpUrl(item.link) || '';
     // Prefer RSS description; fall back to content/encoded, then content.
     const rawSummary = item.contentSnippet || item.content || item.summary || item.contentEncoded || '';
     const summary = summarize(rawSummary, MAX_SUMMARY_LEN);
     const publishedAt = toEpochMs(item.isoDate || item.pubDate || item.pubdate);
-    const imageUrl = pickImage(item);
+    const imageUrl = httpUrl(pickImage(item));
     return { title, url, summary, publishedAt, imageUrl };
   });
-  return { feedTitle: feed.title || feedUrl, items };
+  return { feedTitle: feed.title || feedUrl, items, notModified: false, ...validators };
 }
 
 export { stripHtml };

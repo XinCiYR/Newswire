@@ -1,7 +1,7 @@
 // Smoke-render the built SPA in a jsdom DOM to catch fatal runtime errors and
 // confirm real data actually renders. Requires the backend to be running
 // (it proxies the app's /api requests to http://localhost:4000).
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
@@ -9,18 +9,20 @@ import { JSDOM } from 'jsdom';
 const clientRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(clientRoot, 'dist');
 const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
-const bundleFile = readdirSync(path.join(dist, 'assets')).find((f) => f.endsWith('.js'));
+const bundleFile = html.match(/src="\/assets\/([^"]+\.js)"/)?.[1];
 if (!bundleFile) throw new Error('No JS bundle found in dist/assets');
+const baseUrl = process.env.SMOKE_BASE_URL || 'http://localhost:4000';
+const realFetch = globalThis.fetch;
 
 const dom = new JSDOM(html, {
-  url: 'http://localhost:4000/',
+  url: baseUrl,
   pretendToBeVisual: true,
 });
 const { window } = dom;
 
 // Expose browser globals to the ESM bundle.
 for (const key of Object.getOwnPropertyNames(window)) {
-  if (!(key in globalThis) || key === 'fetch') {
+  if (!(key in globalThis)) {
     try {
       const val = window[key];
       Object.defineProperty(globalThis, key, { configurable: true, get: () => window[key] });
@@ -31,9 +33,8 @@ for (const key of Object.getOwnPropertyNames(window)) {
 }
 
 // Patch fetch so relative URLs like "/api/..." reach the live server.
-const realFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
-  const url = typeof input === 'string' ? new URL(input, 'http://localhost:4000').href : input;
+  const url = typeof input === 'string' ? new URL(input, baseUrl).href : input;
   return realFetch(url, init);
 };
 window.fetch = globalThis.fetch;
@@ -89,4 +90,5 @@ if (!solidThumb || !thumbBanner || !bannerBg) {
   process.exit(1);
 }
 console.log('SMOKE OK: React mounted, logo cleaned, "All" tab count present, gradient banner rendered.');
-process.exit(0);
+dom.window.close();
+globalThis.fetch = realFetch;

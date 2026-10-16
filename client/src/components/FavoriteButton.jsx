@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
@@ -8,6 +8,7 @@ export default function FavoriteButton({ articleId, initial, size = 'sm', onChan
   const navigate = useNavigate();
   const [on, setOn] = useState(Boolean(initial));
   const [busy, setBusy] = useState(false);
+  useEffect(() => { setOn(Boolean(user && initial)); }, [articleId, initial, user?.id]);
 
   async function toggle(e) {
     e.preventDefault();

@@ -10,16 +10,21 @@ services:
     env: node
     plan: free
     buildCommand: |
-      npm install --prefix server && \
-      npm install --prefix client && \
-      npm install --prefix client --no-save esbuild && \
-      cd client && npm run build
+      npm ci --prefix server && \
+      npm ci --prefix client --include=dev && \
+      npm run build --prefix client
     startCommand: npm run start
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: ADMIN_USER_IDS
+        value: ""
       - key: PORT
         value: 4000
       - key: JWT_ACCESS_SECRET
@@ -30,7 +35,7 @@ services:
         generateValue: true
       # Set to false + use an external cron (cron-job.org) on sleeping free tier.
       - key: ENABLE_IN_PROCESS_CRON
-        value: "true"
+        value: "false"
       - key: SCRAPE_INTERVAL_MINUTES
         value: "30"
       # Leave blank/SQLite for a throwaway trial; set to your Neon/Supabase PG URL for durable data.

@@ -27,6 +27,8 @@ export async function ensureSchema() {
   await addColumnIfMissing(db, 'sources', 'fail_count', 'INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing(db, 'sources', 'next_retry_at', 'BIGINT');
   await addColumnIfMissing(db, 'sources', 'authority', 'INTEGER NOT NULL DEFAULT 3');
+  await addColumnIfMissing(db, 'sources', 'etag', 'TEXT');
+  await addColumnIfMissing(db, 'sources', 'last_modified', 'TEXT');
 
   // 3) Indexes (now that columns exist).
   for (const stmt of indexes) {
@@ -46,7 +48,7 @@ export async function ensureSchema() {
 async function columnExists(db, table, column) {
   if (db.isPg) {
     const r = await db.get(
-      `SELECT 1 AS x FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+      `SELECT 1 AS x FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
       [table, column]
     );
     return Boolean(r);

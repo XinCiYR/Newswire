@@ -51,14 +51,33 @@ const KEYWORDS = {
   ],
 };
 
-function countMatches(text, words) {
-  if (!text) return 0;
-  const lower = text.toLowerCase();
-  let score = 0;
-  for (const w of words) {
-    if (lower.includes(w)) score += 1;
+function normalize(text) {
+  const lower = String(text || '').normalize('NFKC').toLowerCase();
+  return { lower, tokens: (lower.match(/[\p{L}\p{N}]+/gu) || []).join(' ') };
+}
+
+function compileKeyword(keyword) {
+  if (/\p{Script=Han}/u.test(keyword)) return ({ lower }) => lower.includes(keyword);
+  const tokens = normalize(keyword).tokens.split(' ');
+  const last = tokens.pop();
+  // Support ordinary plurals without allowing short terms such as AI/AR/app
+  // to match inside rain/market/happy. Punctuation separates phrase tokens.
+  let suffix = last;
+  if (/^[a-z]{3,}$/.test(last) && !last.endsWith('s')) {
+    const plural = /[^aeiou]y$/.test(last) ? `${last.slice(0, -1)}ies`
+      : /(?:ch|sh|x|z)$/.test(last) ? `${last}es` : `${last}s`;
+    suffix = `(?:${last}|${plural})`;
   }
-  return score;
+  const expression = new RegExp(`(?:^| )${[...tokens, suffix].join(' ')}(?: |$)`, 'u');
+  return ({ tokens: text }) => expression.test(text);
+}
+
+const MATCHERS = Object.fromEntries(Object.entries(KEYWORDS).map(([category, keywords]) => [
+  category, [...new Set(keywords)].map(compileKeyword),
+]));
+
+function countMatches(text, matchers) {
+  return matchers.reduce((score, matches) => score + Number(matches(text)), 0);
 }
 
 /**
@@ -66,13 +85,14 @@ function countMatches(text, words) {
  * @returns { category, scores }
  */
 export function classify(title, summary) {
-  const text = `${title || ''} ${summary || ''}`.trim();
+  const normalizedTitle = normalize(title);
+  const normalizedSummary = normalize(summary);
   const scores = {};
   let best = 'Other';
   let bestScore = 0;
   for (const cat of CATEGORIES) {
     if (cat === 'Other') continue;
-    const s = countMatches(title, KEYWORDS[cat]) * 2 + countMatches(summary, KEYWORDS[cat]);
+    const s = countMatches(normalizedTitle, MATCHERS[cat]) * 2 + countMatches(normalizedSummary, MATCHERS[cat]);
     scores[cat] = s;
     if (s > bestScore) {
       bestScore = s;

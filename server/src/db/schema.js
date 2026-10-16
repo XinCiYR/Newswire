@@ -1,3 +1,5 @@
+import { articleSearchVector } from './search.js';
+
 /**
  * Schema definitions for both backends.
  * Booleans are INTEGER 0/1; timestamps are BIGINT Unix epoch ms.
@@ -7,7 +9,7 @@ export function schema(dialect /* 'sqlite' | 'pg' */) {
   const isPg = dialect === 'pg';
   const pk = isPg ? 'BIGSERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
   const ref = isPg ? 'BIGINT' : 'INTEGER';
-  const fkDrop = isPg ? 'ALTER TABLE ... DROP CONSTRAINT' : '';
+  const createIndex = isPg ? 'CREATE INDEX CONCURRENTLY IF NOT EXISTS' : 'CREATE INDEX IF NOT EXISTS';
 
   return [
     `
@@ -29,6 +31,14 @@ CREATE TABLE IF NOT EXISTS sources (
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at BIGINT NOT NULL
 )`,
+    `
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id ${ref} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at BIGINT NOT NULL
+)`,
+    `CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expiry ON refresh_tokens (expires_at)`,
     `
 CREATE TABLE IF NOT EXISTS articles (
   id ${pk},
@@ -52,6 +62,9 @@ CREATE INDEX IF NOT EXISTS idx_articles_category ON articles (category)`,
 CREATE INDEX IF NOT EXISTS idx_articles_views ON articles (views DESC)`,
     `
 CREATE INDEX IF NOT EXISTS idx_articles_cat_pub ON articles (category, published_at DESC)`,
+    `${createIndex} idx_articles_fingerprint_pub ON articles (fingerprint, published_at DESC)`,
+    `${createIndex} idx_articles_source_pub ON articles (source_id, published_at DESC, id DESC)`,
+    ...(isPg ? [`${createIndex} idx_articles_search ON articles USING GIN (${articleSearchVector()})`] : []),
     `
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,

@@ -11,10 +11,11 @@
     "migrate": "node src/db/migrate.js",
     "seed": "node src/db/seed.js",
     "fetch": "node src/scraper/run-once.js",
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js",
+    "test:postgres": "node scripts/test-postgres.mjs"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0 <25"
   },
   "dependencies": {
     "cors": "^2.8.5",

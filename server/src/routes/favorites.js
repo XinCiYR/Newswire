@@ -1,18 +1,18 @@
 import { Router } from 'express';
-import { addFavorite, removeFavorite, listFavorites, countFavorites } from '../models/favorites.js';
+import { addFavorite, removeFavorite, listFavorites } from '../models/favorites.js';
 import { findById } from '../models/articles.js';
 import { requireAuth } from '../auth/middleware.js';
+import { queryInteger } from '../utils/query.js';
 
 const router = Router();
 
 // GET /api/favorites
 router.get('/api/favorites', requireAuth, async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 60, 200);
-    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const limit = queryInteger(req.query.limit, { fallback: 60, min: 1, max: 200 });
+    const offset = queryInteger(req.query.offset);
     const result = await listFavorites(req.user.id, { limit, offset });
-    const count = await countFavorites(req.user.id);
-    return res.json({ ...result, count });
+    return res.json({ ...result, count: result.total });
   } catch (e) {
     next(e);
   }

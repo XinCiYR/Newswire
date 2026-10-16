@@ -25,7 +25,7 @@ Built to be **simple, reliable, and free-to-deploy** (Render / Railway / Docker)
   **JWT** access + rotating refresh tokens (server-side revoke on logout).
 - **Favorites** — heart toggle on every card and detail page, persistent per user.
 - **Browsing history** — opening an article records a view; view/clear history page.
-- **Admin-lite** — logged-in users can correct an article's category.
+- **Administration** — only existing accounts listed in `ADMIN_USER_IDS` can correct categories or add feeds.
 - **Display name** — set a name at registration; edit it inline from the header.
 - **Trending & views** — every article has a view counter; the home page toggles
   between **Latest** and **Trending** (most-viewed). Related articles appear on detail pages.
@@ -142,7 +142,7 @@ backends, so the schema is dialect-agnostic).
 
 ## 🚀 Local development
 
-**Prereqs:** Node.js ≥ 20 (Node 24 recommended).
+**Prereqs:** Node.js 24.x (the server imports built-in `node:sqlite`).
 
 ```bash
 # 1. Install deps (uses npm; installs into server/ and client/)
@@ -195,7 +195,12 @@ npm run fetch
 | `JWT_REFRESH_SECRET` | *(dev)* | Refresh-token signing secret |
 | `JWT_ACCESS_TTL` | `900` (15 min) | Access token lifetime (s) |
 | `JWT_REFRESH_TTL` | `2592000` (30 d) | Refresh token lifetime (s) |
+| `ADMIN_USER_IDS` | *(empty)* | Comma-separated IDs of existing administrator accounts; empty disables admin writes |
+| `TRUST_PROXY` | `0` | Trusted reverse-proxy hops; use `1` behind the configured Render proxy |
 | `SCRAPE_INTERVAL_MINUTES` | `30` | In-process scrape interval |
+| `SCRAPE_CONCURRENCY` | `4` | Maximum simultaneous feed requests (capped at 16) |
+| `SCRAPE_TIMEOUT_MS` | `20000` | Timeout for HTTP headers and body |
+| `SCRAPE_MAX_RESPONSE_BYTES` | `2097152` | Maximum feed size in bytes, including decompressed content |
 | `CRON_SECRET` | *(dev)* | Shared secret for `/api/cron/trigger` |
 | `ENABLE_IN_PROCESS_CRON` | `true` | Enable the in-container scheduler |
 | `CORS_ORIGINS` | `http://localhost:5173` | Allowed origins (comma-separated) |
@@ -220,7 +225,7 @@ npm run fetch
 | GET | `/api/articles/:id` | opt | Article detail |
 | GET | `/api/articles/:id/related` | opt | Related (same-category) articles |
 | POST | `/api/articles/:id/view` | opt | Count a view (also logs history when authenticated) |
-| PATCH | `/api/articles/:id/category` | ✓ | Correct a category |
+| PATCH | `/api/articles/:id/category` | admin | Correct a category |
 | GET | `/api/favorites` | ✓ | List favorites |
 | POST | `/api/favorites/:id` | ✓ | Add favorite |
 | DELETE | `/api/favorites/:id` | ✓ | Remove favorite |
@@ -237,16 +242,22 @@ Auth uses `Authorization: Bearer <accessToken>`.
 ## 🧪 Testing
 
 ```bash
-# Integration tests (in-process server, isolated temp SQLite)
-cd server && node --test test/
+# Backend + frontend regression tests (isolated temporary database)
+npm test
+# Build and smoke-render the SPA against an isolated API server
+npm --prefix client run smoke:test
 ```
 
 The suite covers: health & categories, article list & search, register→login→me→refresh,
 duplicate/bad-login rejection, favorite add/list/remove, view-record + history list/clear,
 and category-correction auth.
 
-> In this repo the tests were also run directly (`node test/integration.test.js`) and
-> pass in the sandbox; use the `node --test` form on a normal machine.
+The review and complete change inventory are recorded in `PROJECT_REVIEW.md`.
+The performance/ingestion iteration, PostgreSQL and Docker verification commands are
+recorded in `ITERATION_NOTES.md`. `.github/workflows/verify.yml` runs SQLite/client,
+PostgreSQL 16/18, and Docker startup/persistence checks on pushes and pull requests.
+On the first deployment of the session-security fixes, existing sessions must sign in again.
+Production requires distinct random JWT secrets and a random cron secret, each at least 32 characters.
 
 ---
 
@@ -277,6 +288,7 @@ docker compose up --build
 ```
 For production Postgres, uncomment the `db` service in `docker-compose.yml` and set
 `DATABASE_URL` to `postgres://newswire:newswire@db:5432/newswire`.
+Set all three secret variables in your shell or root `.env` before running Compose.
 
 ### Option D — External scheduler (for sleeping containers)
 Set `ENABLE_IN_PROCESS_CRON=false`, then schedule a cron (e.g. **cron-job.org**) on

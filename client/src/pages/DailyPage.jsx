@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { useAuth } from '../auth';
 import { formatTime } from '../lib';
 import FavoriteButton from '../components/FavoriteButton';
 import Seo from '../components/Seo';
 import { Loader, Empty } from '../components/States';
 
 export default function DailyPage() {
+  const { user } = useAuth();
   const [items, setItems] = useState(null);
   const [error, setError] = useState(null);
 
@@ -16,7 +18,7 @@ export default function DailyPage() {
       .then((r) => { if (live) setItems(r.articles || []); })
       .catch((e) => { if (live) setError(e.message); });
     return () => { live = false; };
-  }, []);
+  }, [user?.id]);
 
   if (error) return <Empty icon="⚠️" title="Couldn’t load today’s brief" message={error} />;
   if (!items) return <Loader />;

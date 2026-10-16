@@ -40,7 +40,7 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
 
   // One refresh attempt on 401 for authenticated calls.
   if (res.status === 401 && auth && authState?.refreshToken) {
-    const refreshed = await refreshTokens();
+    const refreshed = await refreshTokens(authState);
     if (refreshed) {
       headers.Authorization = `Bearer ${refreshed.accessToken}`;
       res = await fetch(`${API_BASE}${path}`, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
@@ -60,8 +60,22 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
   return json;
 }
 
-async function refreshTokens() {
-  const authState = readAuth();
+let refreshFlight = null;
+
+function refreshTokens(authState) {
+  const current = readAuth();
+  if (!current || current.user?.id !== authState.user?.id) return Promise.resolve(null);
+  if (current.refreshToken !== authState.refreshToken) return Promise.resolve(current);
+  if (refreshFlight?.token === authState.refreshToken) return refreshFlight.promise;
+  const flight = { token: authState.refreshToken };
+  flight.promise = performRefresh(authState).finally(() => {
+    if (refreshFlight === flight) refreshFlight = null;
+  });
+  refreshFlight = flight;
+  return flight.promise;
+}
+
+async function performRefresh(authState) {
   if (!authState?.refreshToken) return null;
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
@@ -70,8 +84,11 @@ async function refreshTokens() {
       body: JSON.stringify({ refreshToken: authState.refreshToken }),
     });
     const json = await res.json();
+    // A sign-out or another sign-in may have happened while fetch was pending.
+    if (readAuth()?.refreshToken !== authState.refreshToken) return null;
     if (!res.ok) {
-      clearAuth();
+      if (res.status === 401 || res.status === 400) clearAuth();
+      else throw Object.assign(new Error(json?.error || 'Session refresh unavailable'), { status: res.status });
       return null;
     }
     const next = {
@@ -81,9 +98,8 @@ async function refreshTokens() {
     };
     writeAuth(next);
     return { accessToken: json.accessToken };
-  } catch {
-    clearAuth();
-    return null;
+  } catch (error) {
+    throw Object.assign(new Error('Session refresh unavailable. Please try again.'), { status: error.status || 503 });
   }
 }
 

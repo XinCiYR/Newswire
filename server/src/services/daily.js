@@ -11,7 +11,7 @@ const STOP = new Set([
 ]);
 
 function words(t) {
-  return (t || '').toLowerCase().match(/[a-z0-9]{2,}/g) || [];
+  return ((t || '').toLowerCase().match(/[a-z0-9]{2,}/g) || []).filter((word) => !STOP.has(word));
 }
 
 function dayKey() {
@@ -104,7 +104,13 @@ export async function computeDaily() {
 /** Return today's daily list (cached for the day; recompute on new day). */
 export async function getDaily() {
   const today = dayKey();
-  if (cache.date === today && cache.articles.length) return cache.articles;
-  cache = { date: today, articles: await computeDaily() };
-  return cache.articles;
+  if (cache.date !== today || !cache.articles.length) {
+    cache = { date: today, articles: await computeDaily() };
+  }
+  // Routes add user-specific fields; never let them mutate shared cached picks.
+  return cache.articles.map((article) => ({ ...article }));
+}
+
+export function invalidateDaily() {
+  cache = { date: null, articles: [] };
 }

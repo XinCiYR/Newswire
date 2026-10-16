@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useArticles } from '../hooks';
 import ArticleGrid from '../components/ArticleGrid';
@@ -15,12 +15,12 @@ export default function CategoryPage() {
   const [offset, setOffset] = useState(0);
   const [source, setSource] = useState('');
   const [range, setRange] = useState('');
-  const loadParams = useCallback(() => ({
+  const loadParams = useMemo(() => ({
     category, limit: PAGE_SIZE, offset,
     sourceId: source || undefined,
     since: range ? Date.now() - RANGE_MS[range] : undefined,
   }), [category, offset, source, range]);
-  const { articles, total, loading, error, reload } = useArticles(loadParams());
+  const { articles, total, loading, error, reload } = useArticles(loadParams);
 
   // Reset to the first page when jumping to another category.
   useEffect(() => {

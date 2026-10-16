@@ -5,6 +5,7 @@ node_modules/
 # Builds
 client/dist/
 build/
+.test-build/
 
 # Environment & secrets
 .env

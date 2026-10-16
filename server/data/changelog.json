@@ -1,5 +1,18 @@
 [
   {
+    "version": "v1.5.0",
+    "date": "2026-10-16",
+    "title": "Faster discovery, safer accounts & more reliable feeds",
+    "items": [
+      { "type": "perf", "text": "Batch favorite lookups and add indexes for full-text search, source filters and deduplication" },
+      { "type": "fix", "text": "Fix repeated time-filter requests, search boundaries and daily favorite-state isolation" },
+      { "type": "fix", "text": "Rotate refresh tokens once, revoke sessions on sign-out and restrict feed/category changes to administrators" },
+      { "type": "perf", "text": "Limit concurrent feed requests and response sizes; skip unchanged feeds with conditional requests" },
+      { "type": "fix", "text": "Match complete words and phrases to reduce news classification mistakes" },
+      { "type": "feature", "text": "Add automated SQLite, PostgreSQL and Docker verification" }
+    ]
+  },
+  {
     "version": "v1.0.0",
     "date": "2026-08-23",
     "title": "Initial public release",

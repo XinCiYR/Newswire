@@ -14,13 +14,18 @@ export function AuthProvider({ children }) {
       // Validate/hydrate the user from the server.
       api.me()
         .then((r) => {
+          if (!getAuth() || getAuth()?.user?.id !== stored.user?.id) return;
           const next = { ...getAuth(), user: r.user };
           setAuth(next);
           setUser(r.user);
         })
-        .catch(() => {
-          clearAuth();
-          setUser(null);
+        .catch((err) => {
+          const current = getAuth();
+          if (current && current.user?.id !== stored.user?.id) return;
+          if (err.status === 401) {
+            clearAuth();
+            setUser(null);
+          }
         })
         .finally(() => setReady(true));
     } else {

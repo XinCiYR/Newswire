@@ -1,4 +1,5 @@
 import getDb from '../db/database.js';
+import config from '../config.js';
 
 export async function createUser(email, passwordHash, name = null) {
   const now = Date.now();
@@ -21,7 +22,8 @@ export async function findById(id) {
 }
 
 export async function publicUser(id) {
-  return getDb().get('SELECT id, email, name, created_at FROM users WHERE id = ?', [id]);
+  const user = await getDb().get('SELECT id, email, name, created_at FROM users WHERE id = ?', [id]);
+  return user ? { ...user, isAdmin: config.adminUserIds.includes(Number(user.id)) } : null;
 }
 
 export async function updateName(id, name) {

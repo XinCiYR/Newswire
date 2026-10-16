@@ -1,11 +1,11 @@
 # Multi-stage build: compile the React client, then run the Express server.
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 
 # Install dependencies first (better layer caching).
 COPY server/package.json server/package-lock.json ./server/
 COPY client/package.json client/package-lock.json ./client/
-RUN cd server && npm ci --ignore-scripts && cd ../client && npm ci --ignore-scripts
+RUN cd server && npm ci --omit=dev --ignore-scripts && cd ../client && npm ci --include=dev --ignore-scripts
 
 # Copy source and build the frontend.
 COPY server/ ./server/
@@ -13,7 +13,7 @@ COPY client/ ./client/
 RUN cd client && npm run build
 
 # ---- Runtime image ----
-FROM node:20-alpine
+FROM node:24-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
@@ -21,6 +21,7 @@ WORKDIR /app
 COPY --from=build /app/server/node_modules ./server/node_modules
 COPY --from=build /app/server/package.json ./server/
 COPY --from=build /app/server/src ./server/src
+COPY --from=build /app/server/data/changelog.json ./server/src/data/changelog.json
 COPY --from=build /app/client/dist ./client/dist
 
 WORKDIR /app/server

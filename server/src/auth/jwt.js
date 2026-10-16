@@ -1,30 +1,31 @@
 import jwt from 'jsonwebtoken';
 import config from '../config.js';
+import { randomUUID } from 'node:crypto';
 
 const { accessSecret, refreshSecret, accessTtl, refreshTtl } = config.jwt;
 
 const OPTS = { issuer: 'news-aggregator', audience: 'news-aggregator-web' };
 
-export function signAccessToken(userId) {
-  return jwt.sign({ type: 'access', sub: String(userId) }, accessSecret, {
+export function signAccessToken(userId, tokenVersion) {
+  return jwt.sign({ type: 'access', sub: String(userId), ver: Number(tokenVersion) }, accessSecret, {
     ...OPTS,
     expiresIn: accessTtl,
   });
 }
 
 export function signRefreshToken(userId, tokenVersion) {
-  // token_version enables server-side revocation on logout; jti gives each
-  // token a unique id for possible blocklisting.
+  // A unique jti prevents two logins within the same second sharing a token.
   return jwt.sign({ type: 'refresh', sub: String(userId), ver: tokenVersion }, refreshSecret, {
     ...OPTS,
+    jwtid: randomUUID(),
     expiresIn: refreshTtl,
   });
 }
 
 export function verifyAccessToken(token) {
-  return jwt.verify(token, accessSecret, OPTS);
+  return jwt.verify(token, accessSecret, { ...OPTS, algorithms: ['HS256'] });
 }
 
 export function verifyRefreshToken(token) {
-  return jwt.verify(token, refreshSecret, OPTS);
+  return jwt.verify(token, refreshSecret, { ...OPTS, algorithms: ['HS256'] });
 }

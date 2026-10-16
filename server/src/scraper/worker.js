@@ -5,6 +5,8 @@ import { listSources, recordFetch } from '../models/sources.js';
 import { upsertArticle } from '../models/articles.js';
 import getDb from '../db/database.js';
 import { cleanupArticles } from '../db/cleanup.js';
+import config from '../config.js';
+import { mapConcurrent } from '../utils/concurrency.js';
 
 async function setMeta(key, value) {
   const db = getDb();
@@ -32,35 +34,34 @@ export async function runScrapeCycle({ limit = 60 } = {}) {
     totalFetched: 0,
     totalInserted: 0,
     totalDuplicates: 0,
+    totalNotModified: 0,
     errors: [],
   };
 
   // Fetch all feeds in parallel (bounded concurrency) with per-source errors captured.
-  const fetched = await Promise.all(
-    sources.map(async (source) => {
-      // Respect the failure backoff window (skip sources still cooling down).
-      if (source.next_retry_at && Number(source.next_retry_at) > now) {
-        return { source, items: [], error: 'backoff', skipped: true };
-      }
-      try {
-        const { items } = await fetchFeed(source.feed_url);
-        await recordFetch(source.id, { ok: true });
-        return { source, items: items.slice(0, limit), error: null, skipped: false };
-      } catch (e) {
-        const error = String(e && e.message || e);
-        await recordFetch(source.id, { ok: false, error });
-        return { source, items: [], error, skipped: false };
-      }
-    })
-  );
+  const fetched = await mapConcurrent(sources, config.scrape.concurrency, async (source) => {
+    // Respect the failure backoff window (skip sources still cooling down).
+    if (source.next_retry_at && Number(source.next_retry_at) > now) {
+      return { source, items: [], error: 'backoff', skipped: true };
+    }
+    try {
+      const result = await fetchFeed(source.feed_url, { etag: source.etag, lastModified: source.last_modified });
+      return { source, ...result, items: result.items.slice(0, limit), error: null, skipped: false };
+    } catch (e) {
+      const error = String(e && e.message || e);
+      return { source, items: [], error, skipped: false };
+    }
+  });
 
-  for (const { source, items, error, skipped } of fetched) {
+  for (const { source, items, error, skipped, notModified, etag, lastModified } of fetched) {
     const srcStat = {
       sourceId: Number(source.id),
       sourceName: source.name,
       fetched: skipped ? 0 : items.length,
       inserted: 0,
       duplicated: 0,
+      failed: 0,
+      notModified: Boolean(notModified),
       error: error || null,
       skipped: Boolean(skipped),
     };
@@ -86,13 +87,19 @@ export async function runScrapeCycle({ limit = 60 } = {}) {
         if (result.inserted) srcStat.inserted += 1;
         else srcStat.duplicated += 1;
       } catch (e) {
-        srcStat.error = srcStat.error || `insert: ${String(e && e.message || e)}`;
+        const insertError = `insert: ${String(e && e.message || e)}`;
+        srcStat.failed += 1;
+        srcStat.error = srcStat.error || insertError;
+        summary.errors.push({ source: source.name, error: insertError, skipped: false });
       }
     }
+    // Commit validators only after successful ingestion, so failed writes get retried.
+    if (!skipped) await recordFetch(source.id, { ok: !srcStat.error, error: srcStat.error, etag, lastModified });
     summary.sources.push(srcStat);
     summary.totalFetched += srcStat.fetched;
     summary.totalInserted += srcStat.inserted;
     summary.totalDuplicates += srcStat.duplicated;
+    if (notModified) summary.totalNotModified += 1;
   }
 
   summary.finishedAt = Date.now();

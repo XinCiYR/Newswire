@@ -33,7 +33,7 @@ export default function ArticlePage() {
       .catch((e) => { if (live) setError(e.message); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [id]);
+  }, [id, user?.id]);
 
   // Record a view (public endpoint counts views; also logs history if logged in).
   useEffect(() => {
@@ -93,13 +93,13 @@ export default function ArticlePage() {
         </a>
         <FavoriteButton articleId={article.id} initial={article.favorited} size="lg" />
         <ShareButton title={article.title} url={article.url} />
-        {user && (
+        {user?.isAdmin && (
           editing ? (
             <Dropdown
               value={article.category}
               onChange={(v) => { correctCategory(String(v)); setEditing(false); }}
               ariaLabel="Edit category"
-              options={CATEGORIES.map((c) => ({ value: c.key, label: c.displayLabel || c.key }))}
+              options={CATEGORIES.filter((c) => c.key !== 'All').map((c) => ({ value: c.key, label: c.label }))}
             />
           ) : (
             <button className="link-btn" onClick={() => setEditing(true)}>Edit category</button>

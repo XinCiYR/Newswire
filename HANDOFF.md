@@ -1,5 +1,15 @@
 # Newswire — Project Handoff / Status
 
+> 2026-10-16 review: see `PROJECT_REVIEW.md` for the current findings, fixes and
+> verification. Node 24.x is required; `npm test` now runs on Windows. Admin writes
+> require `ADMIN_USER_IDS`; sessions predating the security migration must sign in again.
+> Older sandbox limitations and roadmap entries below are historical, not current checks.
+
+> Performance/ingestion follow-up: `ITERATION_NOTES.md` records batched favorites,
+> PostgreSQL GIN/source/fingerprint indexes, bounded/conditional feed fetches and
+> classifier boundaries. CI now covers PostgreSQL 16/18 and Docker. Run `npm test`,
+> `npm run test:postgres` (with TEST_DATABASE_URL) or `npm run test:docker`.
+
 > Handoff so a **fresh session (or future you) can continue instantly** from disk.
 > The conversation history is NOT required — everything is in this repo.
 

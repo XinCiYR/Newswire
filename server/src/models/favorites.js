@@ -18,6 +18,22 @@ export async function isFavorited(userId, articleId) {
   return Boolean(row);
 }
 
+/** One lookup per page (chunked for large internal callers), without mutating cached articles. */
+export async function withFavoriteState(userId, articles) {
+  if (!userId || !articles.length) return articles;
+  const ids = [...new Set(articles.map((article) => Number(article.id)))];
+  const saved = new Set();
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    const chunk = ids.slice(offset, offset + 500);
+    const rows = await getDb().all(
+      `SELECT article_id FROM favorites WHERE user_id = ? AND article_id IN (${chunk.map(() => '?').join(',')})`,
+      [userId, ...chunk]
+    );
+    for (const row of rows) saved.add(Number(row.article_id));
+  }
+  return articles.map((article) => ({ ...article, favorited: saved.has(Number(article.id)) }));
+}
+
 export async function listFavorites(userId, { limit = 60, offset = 0 } = {}) {
   const db = getDb();
   const rows = await db.all(

@@ -1,5 +1,6 @@
 import getDb from '../db/database.js';
 import config from '../config.js';
+import { invalidateDaily } from '../services/daily.js';
 
 async function deleteByIds(db, ids) {
   const nums = [...new Set(ids.map(Number))].filter((n) => Number.isFinite(n) && n > 0);
@@ -8,11 +9,14 @@ async function deleteByIds(db, ids) {
   for (let i = 0; i < nums.length; i += 500) {
     const chunk = nums.slice(i, i + 500);
     const ph = chunk.map(() => '?').join(',');
-    const r = await db.run(`DELETE FROM articles WHERE id IN (${ph})`, chunk);
-    deleted += r.changes || chunk.length;
+    // Recheck protection at deletion time: a favorite may have arrived since selection.
+    const r = await db.run(`DELETE FROM articles WHERE id IN (${ph}) AND NOT EXISTS
+      (SELECT 1 FROM favorites f WHERE f.article_id = articles.id)`, chunk);
+    deleted += r.changes;
     if (!db.isPg) {
       // Keep the SQLite FTS index in sync with the articles table.
-      await db.run(`DELETE FROM articles_fts WHERE rowid IN (${ph})`, chunk);
+      await db.run(`DELETE FROM articles_fts WHERE rowid IN (${ph})
+        AND rowid NOT IN (SELECT id FROM articles)`, chunk);
     }
   }
   return deleted;
@@ -69,6 +73,7 @@ export async function cleanupArticles() {
   }
 
   total.deleted = await deleteByIds(db, ids);
+  if (total.deleted) invalidateDaily();
   return total;
 }
 

@@ -23,17 +23,17 @@ export async function setEnabled(id, enabled) {
 }
 
 /** Record the outcome of a feed fetch, updating status + exponential backoff. */
-export async function recordFetch(id, { ok, error }) {
+export async function recordFetch(id, { ok, error, etag = null, lastModified = null }) {
   const db = getDb();
   const now = Date.now();
   if (ok) {
     await db.run(
-      'UPDATE sources SET last_fetched_at = ?, last_error = NULL, fail_count = 0, next_retry_at = NULL WHERE id = ?',
-      [now, id]
+      'UPDATE sources SET last_fetched_at = ?, last_error = NULL, fail_count = 0, next_retry_at = NULL, etag = ?, last_modified = ? WHERE id = ?',
+      [now, etag, lastModified, id]
     );
   } else {
     const s = await db.get('SELECT fail_count FROM sources WHERE id = ?', [id]);
-    const fc = (s?.fail_count || 0) + 1;
+    const fc = Number(s?.fail_count || 0) + 1;
     const backoffMs = Math.min(60 * 60 * 1000, Math.pow(2, Math.min(fc, 6)) * 10 * 1000); // 10s→…→1h
     await db.run(
       'UPDATE sources SET last_fetched_at = ?, last_error = ?, fail_count = ?, next_retry_at = ? WHERE id = ?',

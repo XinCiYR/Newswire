@@ -1,18 +1,13 @@
 import { Router } from 'express';
 import { listArticles, findById, setCategory, incrementViews, relatedArticles, coverageFor } from '../models/articles.js';
-import { isFavorited } from '../models/favorites.js';
-import { optionalAuth, requireAuth } from '../auth/middleware.js';
+import { withFavoriteState } from '../models/favorites.js';
+import { optionalAuth, requireAuth, requireAdmin } from '../auth/middleware.js';
 import { getDb } from '../db/database.js';
 import { getDaily } from '../services/daily.js';
+import { queryInteger } from '../utils/query.js';
 
 const router = Router();
 export const CATEGORIES = ['AI', 'Finance', 'Politics', 'Tech', 'Business', 'Entertainment', 'Other'];
-
-async function decorateFavorite(userId, article) {
-  if (!userId || !article) return article;
-  article.favorited = await isFavorited(userId, article.id);
-  return article;
-}
 
 // GET /api/categories -> list with article counts
 router.get('/api/categories', async (_req, res, next) => {
@@ -34,10 +29,7 @@ router.get('/api/categories', async (_req, res, next) => {
 // GET /api/daily -> today's curated "must-read" top 10 (scored + category-balanced)
 router.get('/api/daily', optionalAuth, async (req, res, next) => {
   try {
-    const articles = await getDaily();
-    if (req.user) {
-      await Promise.all(articles.map((a) => decorateFavorite(req.user.id, a)));
-    }
+    const articles = await withFavoriteState(req.user?.id, await getDaily());
     return res.json({ date: new Date().toISOString().slice(0, 10), articles });
   } catch (e) {
     next(e);
@@ -48,21 +40,22 @@ router.get('/api/daily', optionalAuth, async (req, res, next) => {
 router.get('/api/articles', optionalAuth, async (req, res, next) => {
   try {
     const { category, sourceId, q, order } = req.query;
-    const limit = Math.min(parseInt(req.query.limit, 10) || 24, 100);
-    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-    const since = parseInt(req.query.since, 10) > 0 ? Number(req.query.since) : 0;
+    const limit = queryInteger(req.query.limit, { fallback: 24, min: 1, max: 100 });
+    const offset = queryInteger(req.query.offset);
+    const since = queryInteger(req.query.since);
+    if (q !== undefined && (typeof q !== 'string' || q.length > 300)) {
+      return res.status(400).json({ error: 'Search query must be a string of at most 300 characters' });
+    }
     const result = await listArticles({
       category: category ? String(category) : undefined,
-      sourceId: sourceId ? Number(sourceId) : undefined,
+      sourceId: queryInteger(sourceId, { min: 1 }),
       q: q ? String(q) : undefined,
       order: order || 'new',
       limit,
       offset,
       since,
     });
-    if (req.user) {
-      await Promise.all(result.articles.map((a) => decorateFavorite(req.user.id, a)));
-    }
+    result.articles = await withFavoriteState(req.user?.id, result.articles);
     return res.json(result);
   } catch (e) {
     next(e);
@@ -74,9 +67,9 @@ router.get('/api/articles/:id', optionalAuth, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad id' });
-    const article = await findById(id);
+    let article = await findById(id);
     if (!article) return res.status(404).json({ error: 'Article not found' });
-    if (req.user) await decorateFavorite(req.user.id, article);
+    [article] = await withFavoriteState(req.user?.id, [article]);
     article.coverage = await coverageFor(id);
     return res.json({ article });
   } catch (e) {
@@ -109,11 +102,8 @@ router.get('/api/articles/:id/related', optionalAuth, async (req, res, next) => 
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad id' });
     const article = await findById(id);
     if (!article) return res.status(404).json({ error: 'Article not found' });
-    const limit = Math.min(parseInt(req.query.limit, 10) || 6, 12);
-    const related = await relatedArticles(id, { limit });
-    if (req.user) {
-      await Promise.all(related.map((a) => decorateFavorite(req.user.id, a)));
-    }
+    const limit = queryInteger(req.query.limit, { fallback: 6, min: 1, max: 12 });
+    const related = await withFavoriteState(req.user?.id, await relatedArticles(id, { limit }));
     return res.json({ articles: related });
   } catch (e) {
     next(e);
@@ -121,7 +111,7 @@ router.get('/api/articles/:id/related', optionalAuth, async (req, res, next) => 
 });
 
 // Admin-ish: PATCH /api/articles/:id/category (classified correction)
-router.patch('/api/articles/:id/category', requireAuth, async (req, res, next) => {
+router.patch('/api/articles/:id/category', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { category } = req.body || {};
