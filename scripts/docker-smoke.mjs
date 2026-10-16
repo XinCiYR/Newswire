@@ -43,7 +43,7 @@ async function verify(mode) {
   args.push(image);
   docker(args);
   const port = docker(['port', name, '4000/tcp']).split(':').at(-1);
-  const base = `http://127.0.0.1:${port}`;
+  let base = `http://127.0.0.1:${port}`;
   await waitFor(async () => (await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, name);
   const request = async (url, { token, method = 'GET', body } = {}) => {
     const response = await fetch(base + url, { method, signal: AbortSignal.timeout(5000),
@@ -79,6 +79,9 @@ async function verify(mode) {
   const rotated = await request('/api/auth/refresh', { method: 'POST', body: { refreshToken: session.refreshToken } });
   assert.notEqual(rotated.refreshToken, session.refreshToken);
   docker(['restart', name]);
+  // Docker may allocate a different host port when restarting a random-port binding.
+  const restartedPort = docker(['port', name, '4000/tcp']).split(':').at(-1);
+  base = `http://127.0.0.1:${restartedPort}`;
   await waitFor(async () => (await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2000) })).ok, `${name} restart`);
   const login = await request('/api/auth/login', { method: 'POST', body: credentials });
   assert.equal((await request('/api/favorites', { token: login.accessToken })).total, 1);
