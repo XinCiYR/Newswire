@@ -43,6 +43,10 @@ const config = {
     intervalMinutes: intEnv('SCRAPE_INTERVAL_MINUTES', 30),
     cronSecret: process.env.CRON_SECRET || 'dev-cron-secret',
     enableInProcessCron: boolEnv('ENABLE_IN_PROCESS_CRON', true),
+    // Self-healing: when a request wakes the instance and data is older than two
+    // scrape intervals, run one catch-up cycle in the background. Complements (and
+    // never replaces) the in-process cron or an external scheduler.
+    watchdog: boolEnv('SCRAPE_WATCHDOG', true),
     // Retention / cleanup bounds (keeps the DB from growing unbounded).
     maxArticlesPerSource: intEnv('MAX_ARTICLES_PER_SOURCE', 1000),
     retentionDays: intEnv('ARTICLE_RETENTION_DAYS', 30),

@@ -9,19 +9,32 @@ import { Loader, Empty } from '../components/States';
 
 export default function DailyPage() {
   const { user } = useAuth();
-  const [items, setItems] = useState(null);
+  const [brief, setBrief] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let live = true;
     api.daily()
-      .then((r) => { if (live) setItems(r.articles || []); })
+      .then((r) => {
+        if (!live) return;
+        setBrief({
+          articles: r.articles || [],
+          stale: Boolean(r.stale),
+          latestAt: r.latestAt || null,
+          lastScrapeAt: r.lastScrapeAt || null,
+        });
+      })
       .catch((e) => { if (live) setError(e.message); });
     return () => { live = false; };
   }, [user?.id]);
 
   if (error) return <Empty icon="⚠️" title="Couldn’t load today’s brief" message={error} />;
-  if (!items) return <Loader />;
+  if (!brief) return <Loader />;
+
+  const { articles: items, stale, latestAt, lastScrapeAt } = brief;
+  const staleNote = lastScrapeAt
+    ? `Feeds last refreshed ${formatTime(lastScrapeAt)}.`
+    : 'Feeds haven’t refreshed recently.';
 
   return (
     <div className="container" style={{ paddingTop: 36, paddingBottom: 40 }}>
@@ -31,27 +44,39 @@ export default function DailyPage() {
         <span className="count">{items.length} picks</span>
       </div>
       {items.length === 0 ? (
-        <Empty icon="📰" title="Nothing curated yet" message="The daily brief will populate as feeds are scraped." />
+        <Empty
+          icon="📰"
+          title="Nothing curated yet"
+          message={`${staleNote} The daily brief will populate as feeds are scraped.`}
+        />
       ) : (
-        <ol className="daily-list">
-          {items.map((a, i) => (
-            <li key={a.id} className="daily-item">
-              <span className="daily-num">{i + 1}</span>
-              <div className="daily-body">
-                <div className="meta">
-                  <span className="cat">{a.category}</span>
-                  <span className="dot" />
-                  <span>{formatTime(a.publishedAt)}</span>
-                  <span className="dot" />
-                  <a className="src" href={a.sourceUrl} target="_blank" rel="noopener noreferrer">{a.sourceName}</a>
+        <>
+          {stale ? (
+            <div className="alert info" role="status">
+              <strong>No fresh stories.</strong> {staleNote}{' '}
+              Showing the latest available brief{latestAt ? ` (newest story ${formatTime(latestAt)})` : ''}.
+            </div>
+          ) : null}
+          <ol className="daily-list">
+            {items.map((a, i) => (
+              <li key={a.id} className="daily-item">
+                <span className="daily-num">{i + 1}</span>
+                <div className="daily-body">
+                  <div className="meta">
+                    <span className="cat">{a.category}</span>
+                    <span className="dot" />
+                    <span>{formatTime(a.publishedAt)}</span>
+                    <span className="dot" />
+                    <a className="src" href={a.sourceUrl} target="_blank" rel="noopener noreferrer">{a.sourceName}</a>
+                  </div>
+                  <h3><Link to={`/article/${a.id}`}>{a.title}</Link></h3>
+                  {a.summary ? <p className="summary">{a.summary}</p> : null}
                 </div>
-                <h3><Link to={`/article/${a.id}`}>{a.title}</Link></h3>
-                {a.summary ? <p className="summary">{a.summary}</p> : null}
-              </div>
-              <FavoriteButton articleId={a.id} initial={a.favorited} />
-            </li>
-          ))}
-        </ol>
+                <FavoriteButton articleId={a.id} initial={a.favorited} />
+              </li>
+            ))}
+          </ol>
+        </>
       )}
     </div>
   );

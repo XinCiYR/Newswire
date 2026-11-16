@@ -27,10 +27,26 @@ router.get('/api/categories', async (_req, res, next) => {
 });
 
 // GET /api/daily -> today's curated "must-read" top 10 (scored + category-balanced)
+// `stale`/`latestAt`/`lastScrapeAt` let the client explain when feeds lag behind
+// (e.g. the scheduler has stopped) instead of silently showing an empty brief.
 router.get('/api/daily', optionalAuth, async (req, res, next) => {
   try {
-    const articles = await withFavoriteState(req.user?.id, await getDaily());
-    return res.json({ date: new Date().toISOString().slice(0, 10), articles });
+    const { articles, meta } = await getDaily();
+    const decorated = await withFavoriteState(req.user?.id, articles);
+    const metaRow = await getDb().get("SELECT value FROM app_meta WHERE key = 'last_scrape_at'");
+    let lastScrapeAt = null;
+    if (metaRow) {
+      let raw = metaRow.value;
+      try { raw = JSON.parse(metaRow.value); } catch { /* legacy raw value */ }
+      const parsed = Number(raw);
+      lastScrapeAt = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+    return res.json({
+      date: new Date().toISOString().slice(0, 10),
+      articles: decorated,
+      ...meta,
+      lastScrapeAt,
+    });
   } catch (e) {
     next(e);
   }

@@ -11,6 +11,7 @@ const { fetchFeed } = await import('../src/scraper/fetch.js');
 const { runScrapeCycle } = await import('../src/scraper/worker.js');
 const { createSource } = await import('../src/models/sources.js');
 const { default: config } = await import('../src/config.js');
+const { scrapeIsStale } = await import('../src/scraper/index.js');
 let server;
 let base;
 let active = 0;
@@ -163,4 +164,13 @@ test('failed writes are reported and do not save validators that would suppress 
     if (db.isPg) await db.exec('ALTER TABLE articles DROP CONSTRAINT test_url_length');
     else await db.exec('DROP TRIGGER test_url_length');
   }
+});
+
+test('watchdog treats data older than two scrape intervals as stale', () => {
+  const now = Date.now();
+  const intervalMs = config.scrape.intervalMinutes * 60 * 1000;
+  assert.equal(scrapeIsStale(now - 1000, now), false);
+  assert.equal(scrapeIsStale(now - 2 * intervalMs + 1000, now), false);
+  assert.equal(scrapeIsStale(now - 2 * intervalMs - 1000, now), true);
+  assert.equal(scrapeIsStale(null, now), true);
 });

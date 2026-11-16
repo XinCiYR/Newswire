@@ -453,6 +453,12 @@ img { max-width: 100%; display: block; }
 }
 .alert.error { background: var(--accent-soft); color: var(--accent-dark); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .alert.info { background: color-mix(in srgb, var(--navy) 12%, transparent); color: var(--navy); border: 1px solid color-mix(in srgb, var(--navy) 40%, transparent); }
+/* The muted navy reads too dim on the dark palette — lift it for contrast. */
+[data-theme="dark"] .alert.info {
+  color: #a9bfe0;
+  background: rgba(74, 111, 165, 0.16);
+  border-color: rgba(122, 152, 200, 0.45);
+}
 .form-foot { margin-top: 8px; font-size: 14px; color: var(--text-muted); text-align: center; }
 .form-foot a { color: var(--accent); font-weight: 600; }
 

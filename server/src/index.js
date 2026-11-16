@@ -1,7 +1,7 @@
 import config from './config.js';
 import { ensureSchema } from './db/migrate.js';
 import { createApp } from './app.js';
-import { startScheduler } from './scraper/index.js';
+import { startScheduler, ensureFreshData } from './scraper/index.js';
 import { getDb } from './db/database.js';
 import { NEWS_SOURCES } from './scraper/sources.js';
 import { createSource } from './models/sources.js';
@@ -25,6 +25,10 @@ async function main() {
   const server = app.listen(config.port, () => {
     console.log(`[server] listening on http://localhost:${config.port} (${config.env})`);
   });
+
+  // Self-healing ingestion: when a request wakes a sleeping free-tier instance
+  // and the data is stale, run one catch-up scrape in the background.
+  server.on('request', () => { ensureFreshData().catch(() => {}); });
 
   // Graceful shutdown.
   const shutdown = async (sig) => {

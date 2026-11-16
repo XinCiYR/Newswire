@@ -5,26 +5,29 @@ import { categoryGlassGradient, formatTime } from '../lib';
 
 /** Homepage "Today's Must-Reads": a compact strip of the top 3 daily picks. */
 export default function DailyHighlights() {
-  const [items, setItems] = useState([]);
+  const [daily, setDaily] = useState({ items: [], stale: false });
 
   useEffect(() => {
     let live = true;
     api.daily()
-      .then((r) => { if (live) setItems((r.articles || []).slice(0, 3)); })
+      .then((r) => {
+        if (!live) return;
+        setDaily({ items: (r.articles || []).slice(0, 3), stale: Boolean(r.stale) });
+      })
       .catch(() => {});
     return () => { live = false; };
   }, []);
 
-  if (!items.length) return null;
+  if (!daily.items.length) return null;
 
   return (
     <section className="daily">
       <div className="section-head">
-        <h2>Today&rsquo;s Must-Reads</h2>
+        <h2>{daily.stale ? 'Latest Must-Reads' : 'Today’s Must-Reads'}</h2>
         <Link className="daily-more" to="/daily">Full brief →</Link>
       </div>
       <div className="daily-strip">
-        {items.map((a, i) => (
+        {daily.items.map((a, i) => (
           <Link key={a.id} className="daily-row" to={`/article/${a.id}`}>
             <span className="daily-row-num">{i + 1}</span>
             <span className="daily-row-accent" style={{ background: categoryGlassGradient(a.category) }} />

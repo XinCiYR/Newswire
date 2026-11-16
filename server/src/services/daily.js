@@ -18,19 +18,23 @@ function dayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
-let cache = { date: null, articles: [] };
+let cache = { date: null, brief: null };
 
 /**
- * Score articles published within the daily window:
+ * Score articles published within a window:
  *   score = wFresh·freshness + wCross·crossSource + wAuthority·authority
  * - freshness: recency within the window (0..1)
  * - crossSource: # distinct other sources covering the same event (share >=2
  *   title words), capped at 5 -> 0..1
  * - authority: source authority (1..5) -> /5
  * Then pick the top `limit`, enforcing a per-category cap.
+ *
+ * `windowMs === null` means "no time bound" (used only as a last-resort
+ * fallback): freshness contributes nothing, so coverage + authority decide.
  */
 async function rankWindow(db, windowMs) {
-  const cutoff = Date.now() - windowMs;
+  const allTime = windowMs == null;
+  const cutoff = allTime ? 0 : Date.now() - windowMs;
   const rows = await db.all(
     `SELECT a.*, s.name AS source_name, s.url AS source_url, s.authority
        FROM articles a JOIN sources s ON s.id = a.source_id
@@ -39,7 +43,7 @@ async function rankWindow(db, windowMs) {
       LIMIT 400`,
     [cutoff]
   );
-  if (!rows.length) return { picks: [], candidateCount: 0 };
+  if (!rows.length) return { picks: [], candidateCount: 0, latestAt: null };
 
   const items = rows.map((r) => ({ r, w: new Set(words(r.title)) }));
 
@@ -56,8 +60,8 @@ async function rankWindow(db, windowMs) {
       if (shared >= 2) otherSources.add(other.r.source_id);
     }
     const cross = Math.min(otherSources.size, 5) / 5;
-    const age = Math.max(0, Date.now() - (r.published_at || Date.now()));
-    const fresh = Math.max(0, 1 - age / windowMs);
+    const age = Math.max(0, Date.now() - Number(r.published_at || Date.now()));
+    const fresh = allTime ? 0 : Math.max(0, 1 - age / windowMs);
     const auth = (Number(r.authority) || 3) / 5;
     const score =
       config.daily.wFresh * fresh + config.daily.wCross * cross + config.daily.wAuthority * auth;
@@ -79,38 +83,64 @@ async function rankWindow(db, windowMs) {
   picked.sort((a, b) => b.score - a.score);
   return {
     candidateCount: rows.length,
+    latestAt: Number(rows[0].published_at) || null,
     picks: picked.map((s) => ({ ...toArticle(s.r), score: Math.round(s.score * 100) / 100 })),
   };
 }
 
 /**
- * Score articles within the daily window. If the window is too sparse (fewer
- * than `limit` candidates), progressively widen to 3 days then 7 days so the
- * brief never goes empty when news is momentarily stale.
+ * Compute the brief and attach freshness metadata used by the UI.
+ *
+ * The configured window (default 24h) is widened to 72h and 7 days when it is
+ * too sparse, so a quiet news day never empties the brief. If even the 7-day
+ * window has no stories (e.g. the scraper/scheduler has been down), we fall
+ * back to the newest stories available at all and mark them `stale`, so the
+ * page can show content with an explicit "last updated" note instead of a
+ * dead end. `stale` is true whenever the newest pick predates the configured
+ * window.
  */
 export async function computeDaily() {
   const db = getDb();
   const baseH = config.daily.windowHours;
   const windows = [baseH, Math.max(baseH * 2, 72), 168].filter((v, i, a) => a.indexOf(v) === i);
+  const baseCutoff = Date.now() - baseH * 3600 * 1000;
+
   let best = null;
   for (const h of windows) {
     const res = await rankWindow(db, h * 3600 * 1000);
-    if (res.candidateCount >= config.daily.limit) return res.picks;
-    if (!best || res.candidateCount > best.candidateCount) best = res;
+    if (res.candidateCount >= config.daily.limit) {
+      return { articles: res.picks, meta: { windowHours: h, stale: (res.latestAt || 0) < baseCutoff, latestAt: res.latestAt } };
+    }
+    if (!best || res.candidateCount > best.res.candidateCount) best = { res, hours: h };
   }
-  return best ? best.picks : [];
+
+  // Fewer candidates than the limit, but still inside the widened windows:
+  // return them and flag staleness only when they really predate "today".
+  if (best && best.res.picks.length) {
+    const stale = !best.res.latestAt || best.res.latestAt < baseCutoff;
+    return { articles: best.res.picks, meta: { windowHours: best.hours, stale, latestAt: best.res.latestAt } };
+  }
+
+  const allTime = await rankWindow(db, null);
+  return {
+    articles: allTime.picks,
+    meta: { windowHours: null, stale: allTime.picks.length > 0, latestAt: allTime.latestAt },
+  };
 }
 
-/** Return today's daily list (cached for the day; recompute on new day). */
+/** Return today's daily brief (cached for the day; recompute on new day). */
 export async function getDaily() {
   const today = dayKey();
-  if (cache.date !== today || !cache.articles.length) {
-    cache = { date: today, articles: await computeDaily() };
+  if (cache.date !== today || !cache.brief || !cache.brief.articles.length) {
+    cache = { date: today, brief: await computeDaily() };
   }
   // Routes add user-specific fields; never let them mutate shared cached picks.
-  return cache.articles.map((article) => ({ ...article }));
+  return {
+    articles: cache.brief.articles.map((article) => ({ ...article })),
+    meta: { ...cache.brief.meta },
+  };
 }
 
 export function invalidateDaily() {
-  cache = { date: null, articles: [] };
+  cache = { date: null, brief: null };
 }

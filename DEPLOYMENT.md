@@ -176,6 +176,13 @@ pauses, so we call the scrape endpoint externally.
    - **Schedule**: `*/30 * * * *` (every 30 min)
 4. **Save**. It will start hitting your site every 30 minutes.
 
+> **Self-healing fallback (default on).** The server also watches the age of the last
+> scrape: when a request wakes the instance and the data is older than
+> 2 × `SCRAPE_INTERVAL_MINUTES`, it runs one catch-up scrape in the background
+> (`SCRAPE_WATCHDOG=true`). This recovers a free-tier site if the cron-job.org job is
+> paused, its secret rotated, or a deploy interrupted it. Set `SCRAPE_WATCHDOG=false`
+> to disable it.
+
 > If you later move to an always-on plan, set `ENABLE_IN_PROCESS_CRON=true` and
 > delete the cron-job.org job.
 
@@ -200,7 +207,8 @@ Open the app URL and check:
 - **esbuild error in client build** → make sure you're using the repo's `client/package.json` build script (it includes the font loaders). Don't change it.
 - **Site loads but no articles** → check `/api/scrape/health`; if sources exist but errors, wait for the next cron or trigger one. BBC/Guardian/NYT may need a real network (they work in production).
 - **Login doesn't persist across restart** → secrets must stay the same; don't regenerate them after deploy.
-- **Everything works but news not updating** → confirm cron-job.org job is enabled and `ENABLE_IN_PROCESS_CRON=false`, and that `x-cron-secret` matches.
+- **Everything works but news not updating** → confirm cron-job.org job is enabled and `ENABLE_IN_PROCESS_CRON=false`, and that `x-cron-secret` matches. The watchdog starts a catch-up scrape on the next visit once data is older than two intervals.
+- **"Today's Must-Reads" is empty or shows "No fresh stories"** → `GET /api/scrape/health` and check `lastScrapeAt`. If it is old, the scheduler stopped: visit the site once (watchdog), trigger `POST /api/cron/trigger` manually, or fix the external cron. The brief falls back to the newest available stories instead of an empty page when the 7-day window is empty.
 
 ---
 
